@@ -448,22 +448,30 @@ function insertVar(v) {
 }
 function dueOf(s) {
   // 결제일(원비납부일): 매월 「납부 기준일」의 날짜에 결제.
-  // 미납월 = 최근 납부일의 다음 달 (납부 기록이 없으면 이번 달)
+  // 미납 회차 = 최근 납부일 이후 도래하는 첫 결제일.
+  //   예) 결제일 29일, 6/17 납부 → 6/17 납부는 밀린 5/29분 → 6/29분이 미납.
+  // 단, 결제일 7일 이내의 선납(예: 결제일 1일, 6/30 납부)은 그 회차를 낸 것으로 간주.
   if (!s) return null;
-  const baseDay = s.due ? Number(s.due.split('-')[2])
-                : (s.lastPaid ? Number(s.lastPaid.split('-')[2]) : null); // 기준일 없으면 납부일 날짜로 대체
-  if (!baseDay) return null;
-  let y, m;
-  if (s.lastPaid) {
-    const [py, pm] = s.lastPaid.split('-').map(Number);
-    y = py; m = pm + 1;
-    if (m > 12) { m = 1; y++; }
-  } else {
+  const D = s.due ? Number(s.due.split('-')[2])
+          : (s.lastPaid ? Number(s.lastPaid.split('-')[2]) : null); // 기준일 없으면 납부일 날짜로 대체
+  if (!D) return null;
+  const occ = (y, m) => {                          // 해당 연·월의 결제일 (말일 보정)
+    const last = new Date(y, m, 0).getDate();
+    return new Date(y, m - 1, Math.min(D, last));
+  };
+  if (!s.lastPaid) {                               // 납부 기록 없음 → 이번 달 결제일
     const now = new Date();
-    y = now.getFullYear(); m = now.getMonth() + 1;
+    return occ(now.getFullYear(), now.getMonth() + 1);
   }
-  const lastDay = new Date(y, m, 0).getDate();   // 말일 보정 (예: 31일 → 2월이면 28일)
-  return new Date(y, m - 1, Math.min(baseDay, lastDay));
+  const [py, pm, pd] = s.lastPaid.split('-').map(Number);
+  const paid = new Date(py, pm - 1, pd);
+  let y = py, m = pm;
+  let T = occ(y, m);
+  if (T <= paid) { m++; if (m > 12) { m = 1; y++; } T = occ(y, m); }   // 납부일 이후 첫 결제일
+  if ((T - paid) / 86400000 <= 7) {                                     // 7일 이내 선납 → 다음 회차가 미납
+    m++; if (m > 12) { m = 1; y++; } T = occ(y, m);
+  }
+  return T;
 }
 function buildMsg(s) {
   const now = new Date();
