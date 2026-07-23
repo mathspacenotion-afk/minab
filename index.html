@@ -117,7 +117,7 @@
 <body>
 <div class="wrap">
   <h1>미납자 예약문자 발송</h1>
-  <p class="sub">에어테이블 「수납관리」에서 연체중 학생을 불러와 알리고(Aligo)로 예약문자를 보냅니다.</p>
+  <p class="sub">에어테이블 「수납관리」에서 이번 달 납부 기록이 없는 학생(최근 납부일이 지난달 이전이거나 빈칸)을 불러와 알리고(Aligo)로 예약문자를 보냅니다.</p>
 
   <!-- STEP 1 : 설정 -->
   <div class="card">
@@ -148,6 +148,7 @@
   <!-- STEP 2 : 미납자 불러오기 -->
   <div class="card">
     <h2><span class="step-num">2</span> 미납자 불러오기 <span class="count-pill" id="countPill" style="display:none"></span></h2>
+    <div class="muted" style="margin-bottom:10px" id="critDesc"></div>
     <div class="row" style="margin-bottom:12px">
       <button class="primary" onclick="loadStudents()" id="loadBtn">에어테이블에서 불러오기</button>
       <label style="display:flex;align-items:center;gap:6px;margin:0;font-weight:600;color:var(--ink);font-size:14px;cursor:pointer">
@@ -160,7 +161,7 @@
         <thead>
           <tr>
             <th><input type="checkbox" id="chkAll" checked onchange="toggleAll(this.checked)"></th>
-            <th>이름</th><th>학년/반</th><th>수신번호</th><th>원비</th><th>납부 기준일</th><th>최근 납부일</th><th></th>
+            <th>이름</th><th>학년/반</th><th>수신번호</th><th>원비</th><th>납부 기준일</th><th>최근 납부일</th><th>상태</th>
           </tr>
         </thead>
         <tbody id="stuBody"></tbody>
@@ -288,8 +289,12 @@ async function loadStudents() {
   btn.disabled = true; msg.textContent = '불러오는 중…'; msg.className = 'status-msg';
   try {
     let all = [], offset = '';
+    const monthStart = currentMonthStart();
     do {
-      const formula = encodeURIComponent(`{${F.status}}='연체중'`);
+      // 미납 기준: 최근 납부일자가 이번 달 1일 이전이거나 비어 있음
+      const formula = encodeURIComponent(
+        `OR({${F.lastPaid}}=BLANK(), IS_BEFORE({${F.lastPaid}}, '${monthStart}'))`
+      );
       const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}?filterByFormula=${formula}&pageSize=100` + (offset ? `&offset=${offset}` : '');
       const r = await fetch(url, { headers: { Authorization: 'Bearer ' + pat } });
       if (!r.ok) {
@@ -318,12 +323,14 @@ async function loadStudents() {
         fee: f[F.fee] || 0,
         due: f[F.due] || '',
         lastPaid: f[F.lastPaid] || '',
+        status: f[F.status] || '',
         isOut,
         checked: !isOut
       };
     }).sort((a,b) => a.name.localeCompare(b.name, 'ko'));
 
-    msg.textContent = `연체중 ${students.length}명 불러왔습니다.`; msg.className = 'status-msg ok';
+    const exCnt = students.filter(s => s.isOut).length;
+    msg.textContent = `미납 ${students.length}명 불러왔습니다 (퇴원자 ${exCnt}명 포함).`; msg.className = 'status-msg ok';
     renderTable();
   } catch(e) {
     msg.textContent = e.message; msg.className = 'status-msg err';
@@ -357,8 +364,8 @@ function renderTable() {
       <td>${phoneCell}</td>
       <td>${fmtWon(s.fee)}</td>
       <td>${fmtDate(s.due)}</td>
-      <td>${fmtDate(s.lastPaid)}</td>
-      <td></td>`;
+      <td>${s.lastPaid ? fmtDate(s.lastPaid) : '<span class="badge overdue">기록 없음</span>'}</td>
+      <td>${s.status === '연체중' ? '<span class="badge overdue">연체중</span>' : (s.status === '정상입금' ? '<span class="badge sms">정상입금</span>' : '<span class="muted">—</span>')}</td>`;
     body.appendChild(tr);
   });
   updateCount();
@@ -531,6 +538,10 @@ async function sendTest() {
 }
 
 /* ====== 유틸 ====== */
+function currentMonthStart() {
+  const d = new Date(); const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-01`;
+}
 function fmtWon(n) { return n ? Number(n).toLocaleString('ko-KR') + '원' : ''; }
 function fmtDate(d) {
   if (!d) return '';
@@ -547,6 +558,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 /* ====== 초기화 ====== */
 loadSettings();
+document.getElementById('critDesc').textContent =
+  `미납 기준: 최근 납부일자가 ${new Date().getMonth()+1}월 1일 이전이거나 비어 있는 학생 (이번 달 납부 기록 없음)`;
 document.getElementById('reserveAt').value = defaultReserveTime();
 onTplChange();
 onModeChange();
